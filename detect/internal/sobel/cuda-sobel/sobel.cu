@@ -1,8 +1,8 @@
 #include <stdint.h>
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <cmath>
 
 #include "cuda_runtime.h"
 #include "sobel.h"
@@ -19,11 +19,12 @@
         }                                                              \
     } while (0)
 
-__global__ void monochrome_kernel(uchar4 *input, float *output, int image_size, int w) {
+__global__ void monochrome_kernel(uchar4 *input, float *output, int image_size,
+                                  int w) {
     int i = threadIdx.x + blockDim.x * blockIdx.x;
     if (i < image_size) {
         output[i] = 0.299 * (float)input[i].x + 0.587 * (float)input[i].y +
-                  0.114 * (float)input[i].z;
+                    0.114 * (float)input[i].z;
     }
 }
 
@@ -32,9 +33,7 @@ __global__ void sobel_vertical_kernel(const float *input, float *output,
     int idx = threadIdx.x + blockDim.x * blockIdx.x;
     int i = idx / w;
     int j = idx % w;
-    if (idx < image_size       &&
-        i > 1     && j > 1     &&
-        i < h - 1 && j < w - 1) {
+    if (idx < image_size && i > 1 && j > 1 && i < h - 1 && j < w - 1) {
         *(output + j + w * i) = *(input + (j - 1) + w * (i - 1)) *  1 +
                                 *(input + (j    ) + w * (i - 1)) *  0 +
                                 *(input + (j + 1) + w * (i - 1)) * -1 +
@@ -54,9 +53,7 @@ __global__ void sobel_horizontal_kernel(const float *input, float *output,
     int idx = threadIdx.x + blockDim.x * blockIdx.x;
     int i = idx / w;
     int j = idx % w;
-    if (idx < image_size       &&
-        i > 1     && j > 1     &&
-        i < h - 1 && j < w - 1) {
+    if (idx < image_size && i > 1 && j > 1 && i < h - 1 && j < w - 1) {
         *(output + j + w * i) = *(input + (j - 1) + w * (i - 1)) *  1 +
                                 *(input + (j    ) + w * (i - 1)) *  2 +
                                 *(input + (j + 1) + w * (i - 1)) *  1 +
@@ -78,7 +75,7 @@ __global__ void root_kernel(const float *input_vertical,
     int i = idx / w;
     int j = idx % w;
     if (idx < image_size) {
-        float Y = sqrtf(powf(*(input_vertical   + j + w * i), 2.0) +
+        float Y = sqrtf(powf(*(input_vertical + j + w * i), 2.0) +
                         powf(*(input_horizontal + j + w * i), 2.0));
         *(output + j + w * i) = make_uchar4(Y, Y, Y, 0);
     }
