@@ -28,6 +28,25 @@ __global__ void monochrome_kernel(uchar4 *input, float *output, int image_size,
     }
 }
 
+__global__ void gaussian_kernel(const float *input, float *output, int image_size, int w, int h) {
+    int idx = threadIdx.x + blockDim.x * blockIdx.x;
+    int i = idx / w;
+    int j = idx % w;
+    if (i < image_size && i > 1 && j > 1 && i < h - 1 && j < w - 1) {
+        *(output + j + w * i) = (*(input + (j - 1) + w * (i - 1)) * 1 +
+                                *(input + (j    ) + w * (i - 1)) * 2 +
+                                *(input + (j + 1) + w * (i - 1)) * 1 +
+
+                                *(input + (j - 1) + w * (i    )) * 2 +
+                                *(input + (j    ) + w * (i    )) * 4 +
+                                *(input + (j + 1) + w * (i    )) * 2 +
+
+                                *(input + (j - 1) + w * (i + 1)) * 1 +
+                                *(input + (j    ) + w * (i + 1)) * 2 +
+                                *(input + (j + 1) + w * (i + 1)) * 1) / 16.0;
+    }
+}
+
 __global__ void sobel_vertical_kernel(const float *input, float *output,
                                       int image_size, int w, int h) {
     int idx = threadIdx.x + blockDim.x * blockIdx.x;
@@ -69,14 +88,24 @@ __global__ void sobel_horizontal_kernel(const float *input, float *output,
 }
 
 __global__ void root_kernel(const float *input_vertical,
-                            const float *input_horizontal, uchar4 *output,
+                            const float *input_horizontal, float *output,
                             int image_size, int w) {
     int idx = threadIdx.x + blockDim.x * blockIdx.x;
     int i = idx / w;
     int j = idx % w;
     if (idx < image_size) {
-        float Y = sqrtf(powf(*(input_vertical + j + w * i), 2.0) +
+        *(output + j + w * i) = sqrtf(powf(*(input_vertical + j + w * i), 2.0) +
                         powf(*(input_horizontal + j + w * i), 2.0));
+    }
+}
+
+__global__ void conv_float_uchar4(const float *input, uchar4 *output,
+                                  int image_size, int w) {
+    int idx = threadIdx.x + blockDim.x * blockIdx.x;
+    int i = idx / w;
+    int j = idx % w;
+    if (idx < image_size) {
+        float Y = *(input + j + w * i);
         *(output + j + w * i) = make_uchar4(Y, Y, Y, 0);
     }
 }
@@ -101,15 +130,23 @@ int ApplySobel(uint32_t *data, int w, int h) {
 
     CHECK_CUDART_ERROR(cudaStreamSynchronize(stream));
 
-    // Сolor to grayscale conversion
+    // Сolor (RGBA) to grayscale (float value) conversion
     float *output_monochrome;
     CHECK_CUDART_ERROR(cudaMalloc(&output_monochrome, image_float_size));
 
     monochrome_kernel<<<numBlocks, threadsPerBlock, 0, stream>>>(
         gpu_data, output_monochrome, image_size, w);
+
     CHECK_CUDART_ERROR(cudaStreamSynchronize(stream));
 
-    // TODO: Gaussian blur
+    // Gaussian blur
+    float *output_gaussian;
+    CHECK_CUDART_ERROR(cudaMalloc(&output_gaussian, image_float_size));
+
+    gaussian_kernel<<<numBlocks, threadsPerBlock, 0, stream>>>(
+        output_monochrome, output_gaussian, image_size, w, h);
+
+    CHECK_CUDART_ERROR(cudaStreamSynchronize(stream));
 
     // Sobel vertical core
     float *output_vertical;
@@ -117,6 +154,7 @@ int ApplySobel(uint32_t *data, int w, int h) {
 
     sobel_vertical_kernel<<<numBlocks, threadsPerBlock, 0, stream>>>(
         output_monochrome, output_vertical, image_size, w, h);
+
     CHECK_CUDART_ERROR(cudaStreamSynchronize(stream));
 
     // Sobel horizontal core
@@ -129,11 +167,20 @@ int ApplySobel(uint32_t *data, int w, int h) {
     CHECK_CUDART_ERROR(cudaStreamSynchronize(stream));
 
     // Composing vertical and horizontal outputs in an image
+    float *output_sobel;
+    CHECK_CUDART_ERROR(cudaMalloc(&output_sobel, image_float_size));
+
+    root_kernel<<<numBlocks, threadsPerBlock, 0, stream>>>(
+        output_vertical, output_horizontal, output_sobel, image_size, w);
+
+    CHECK_CUDART_ERROR(cudaStreamSynchronize(stream));
+
+    // Convert float data back to RGBA
     uchar4 *output;
     CHECK_CUDART_ERROR(cudaMalloc(&output, image_byte_size));
 
-    root_kernel<<<numBlocks, threadsPerBlock, 0, stream>>>(
-        output_vertical, output_horizontal, output, image_size, w);
+    conv_float_uchar4<<<numBlocks, threadsPerBlock, 0, stream>>>(
+        output_sobel, output, image_size, w);
 
     CHECK_CUDART_ERROR(cudaStreamSynchronize(stream));
 
@@ -147,8 +194,10 @@ int ApplySobel(uint32_t *data, int w, int h) {
 
     CHECK_CUDART_ERROR(cudaFree(gpu_data));
     CHECK_CUDART_ERROR(cudaFree(output_monochrome));
+    CHECK_CUDART_ERROR(cudaFree(output_gaussian));
     CHECK_CUDART_ERROR(cudaFree(output_vertical));
     CHECK_CUDART_ERROR(cudaFree(output_horizontal));
+    CHECK_CUDART_ERROR(cudaFree(output_sobel));
     CHECK_CUDART_ERROR(cudaFree(output));
 
     return 0;
