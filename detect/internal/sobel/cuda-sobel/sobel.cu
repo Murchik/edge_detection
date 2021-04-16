@@ -19,70 +19,67 @@
         }                                                              \
     } while (0)
 
-__global__ void monochrome_kernel(uchar4 *data, int w, int h) {
-    int image_size = w * h;
+__global__ void monochrome_kernel(uchar4 *input, float *output, int image_size, int w) {
     int i = threadIdx.x + blockDim.x * blockIdx.x;
     if (i < image_size) {
-        float Y = 0.299 * (float)data[i].x + 0.587 * (float)data[i].y +
-                  0.114 * (float)data[i].z;
-        data[i] = make_uchar4(Y, Y, Y, 0);
+        output[i] = 0.299 * (float)input[i].x + 0.587 * (float)input[i].y +
+                  0.114 * (float)input[i].z;
     }
 }
 
-__global__ void sobel_vertical_kernel(const uchar4 *input, uchar4 *output,
-                                      int w, int h) {
-    int image_size = w * h;
+__global__ void sobel_vertical_kernel(const float *input, float *output,
+                                      int image_size, int w, int h) {
     int idx = threadIdx.x + blockDim.x * blockIdx.x;
-    if (idx < image_size) {
-        int i = idx % w;
-        int j = idx / w;
-        unsigned char Y =   (*(input + (j - 1) + w * (i - 1))).x *  1 +
-                            (*(input + (j    ) + w * (i - 1))).x *  0 +
-                            (*(input + (j + 1) + w * (i - 1))).x * -1 +
+    int i = idx / w;
+    int j = idx % w;
+    if (idx < image_size       &&
+        i > 1     && j > 1     &&
+        i < h - 1 && j < w - 1) {
+        *(output + j + w * i) = *(input + (j - 1) + w * (i - 1)) *  1 +
+                                *(input + (j    ) + w * (i - 1)) *  0 +
+                                *(input + (j + 1) + w * (i - 1)) * -1 +
 
-                            (*(input + (j - 1) + w * (i    ))).x *  2 +
-                            (*(input + (j    ) + w * (i    ))).x *  0 +
-                            (*(input + (j + 1) + w * (i    ))).x * -2 +
+                                *(input + (j - 1) + w * (i    )) *  2 +
+                                *(input + (j    ) + w * (i    )) *  0 +
+                                *(input + (j + 1) + w * (i    )) * -2 +
 
-                            (*(input + (j - 1) + w * (i + 1))).x *  1 +
-                            (*(input + (j    ) + w * (i + 1))).x *  0 +
-                            (*(input + (j + 1) + w * (i + 1))).x * -1;
-        *(output + j + w * i) = make_uchar4(Y, Y, Y, 0);
+                                *(input + (j - 1) + w * (i + 1)) *  1 +
+                                *(input + (j    ) + w * (i + 1)) *  0 +
+                                *(input + (j + 1) + w * (i + 1)) * -1;
     }
 }
 
-__global__ void sobel_horizontal_kernel(const uchar4 *input, uchar4 *output,
-                                      int w, int h) {
-    int image_size = w * h;
+__global__ void sobel_horizontal_kernel(const float *input, float *output,
+                                        int image_size, int w, int h) {
     int idx = threadIdx.x + blockDim.x * blockIdx.x;
-    if (idx < image_size) {
-        int i = idx % w;
-        int j = idx / w;
-        unsigned char Y =   (*(input + (j - 1) + w * (i - 1))).x *  1 +
-                            (*(input + (j    ) + w * (i - 1))).x *  2 +
-                            (*(input + (j + 1) + w * (i - 1))).x *  1 +
+    int i = idx / w;
+    int j = idx % w;
+    if (idx < image_size       &&
+        i > 1     && j > 1     &&
+        i < h - 1 && j < w - 1) {
+        *(output + j + w * i) = *(input + (j - 1) + w * (i - 1)) *  1 +
+                                *(input + (j    ) + w * (i - 1)) *  2 +
+                                *(input + (j + 1) + w * (i - 1)) *  1 +
 
-                            (*(input + (j - 1) + w * (i    ))).x *  0 +
-                            (*(input + (j    ) + w * (i    ))).x *  0 +
-                            (*(input + (j + 1) + w * (i    ))).x *  0 +
+                                *(input + (j - 1) + w * (i    )) *  0 +
+                                *(input + (j    ) + w * (i    )) *  0 +
+                                *(input + (j + 1) + w * (i    )) *  0 +
 
-                            (*(input + (j - 1) + w * (i + 1))).x * -1 +
-                            (*(input + (j    ) + w * (i + 1))).x * -2 +
-                            (*(input + (j + 1) + w * (i + 1))).x * -1;
-        *(output + j + w * i) = make_uchar4(Y, Y, Y, 0);
+                                *(input + (j - 1) + w * (i + 1)) * -1 +
+                                *(input + (j    ) + w * (i + 1)) * -2 +
+                                *(input + (j + 1) + w * (i + 1)) * -1;
     }
 }
 
-__global__ void root_kernel(const uchar4 *input_vertical,
-                            const uchar4 *input_horizontal, uchar4 *output,
-                            int w, int h) {
-    int image_size = w * h;
+__global__ void root_kernel(const float *input_vertical,
+                            const float *input_horizontal, uchar4 *output,
+                            int image_size, int w) {
     int idx = threadIdx.x + blockDim.x * blockIdx.x;
+    int i = idx / w;
+    int j = idx % w;
     if (idx < image_size) {
-        int i = idx % w;
-        int j = idx / w;
-        unsigned char Y = sqrt(pow((*(input_vertical + j + w * i)).x, 2.0) +
-                               pow((*(input_horizontal + j + w * i)).x, 2.0));
+        float Y = sqrtf(powf(*(input_vertical   + j + w * i), 2.0) +
+                        powf(*(input_horizontal + j + w * i), 2.0));
         *(output + j + w * i) = make_uchar4(Y, Y, Y, 0);
     }
 }
@@ -91,50 +88,71 @@ int ApplySobel(uint32_t *data, int w, int h) {
     cudaStream_t stream;
     CHECK_CUDART_ERROR(cudaStreamCreate(&stream));
 
-    size_t image_byte_size = sizeof(uchar4) * w * h;
+    int image_size = w * h;
 
+    size_t image_byte_size = sizeof(uchar4) * image_size;
+    int image_float_size = sizeof(float) * image_size;
+
+    int threadsPerBlock = 256;
+    int numBlocks = image_size / threadsPerBlock + 1;
+
+    // Copying input data into GPU
     uchar4 *gpu_data;
     CHECK_CUDART_ERROR(cudaMalloc(&gpu_data, image_byte_size));
-
     CHECK_CUDART_ERROR(cudaMemcpyAsync(gpu_data, data, image_byte_size,
                                        cudaMemcpyHostToDevice, stream));
 
-    int threadsPerBlock = 256;
-    int numBlocks = w * h / threadsPerBlock + 1;
-
-    monochrome_kernel<<<numBlocks, threadsPerBlock, 0, stream>>>(gpu_data, w,
-                                                                 h);
     CHECK_CUDART_ERROR(cudaStreamSynchronize(stream));
 
-    uchar4 *output_vertical;
-    CHECK_CUDART_ERROR(cudaMalloc(&output_vertical, image_byte_size));
+    // Сolor to grayscale conversion
+    float *output_monochrome;
+    CHECK_CUDART_ERROR(cudaMalloc(&output_monochrome, image_float_size));
+
+    monochrome_kernel<<<numBlocks, threadsPerBlock, 0, stream>>>(
+        gpu_data, output_monochrome, image_size, w);
+    CHECK_CUDART_ERROR(cudaStreamSynchronize(stream));
+
+    // TODO: Gaussian blur
+
+    // Sobel vertical core
+    float *output_vertical;
+    CHECK_CUDART_ERROR(cudaMalloc(&output_vertical, image_float_size));
+
     sobel_vertical_kernel<<<numBlocks, threadsPerBlock, 0, stream>>>(
-        gpu_data, output_vertical, w, h);
+        output_monochrome, output_vertical, image_size, w, h);
     CHECK_CUDART_ERROR(cudaStreamSynchronize(stream));
 
-    uchar4 *output_horizontal;
-    CHECK_CUDART_ERROR(cudaMalloc(&output_horizontal, image_byte_size));
+    // Sobel horizontal core
+    float *output_horizontal;
+    CHECK_CUDART_ERROR(cudaMalloc(&output_horizontal, image_float_size));
+
     sobel_horizontal_kernel<<<numBlocks, threadsPerBlock, 0, stream>>>(
-        gpu_data, output_horizontal, w, h);
+        output_monochrome, output_horizontal, image_size, w, h);
+
     CHECK_CUDART_ERROR(cudaStreamSynchronize(stream));
 
+    // Composing vertical and horizontal outputs in an image
     uchar4 *output;
     CHECK_CUDART_ERROR(cudaMalloc(&output, image_byte_size));
+
     root_kernel<<<numBlocks, threadsPerBlock, 0, stream>>>(
-        output_vertical, output_horizontal, output, w, h);
+        output_vertical, output_horizontal, output, image_size, w);
+
     CHECK_CUDART_ERROR(cudaStreamSynchronize(stream));
 
+    // Copying output data into CPU
     CHECK_CUDART_ERROR(cudaMemcpyAsync(data, output, image_byte_size,
                                        cudaMemcpyDeviceToHost, stream));
-                                       
+
     CHECK_CUDART_ERROR(cudaStreamSynchronize(stream));
 
     CHECK_CUDART_ERROR(cudaStreamDestroy(stream));
 
-    CHECK_CUDART_ERROR(cudaFree(output));
-    CHECK_CUDART_ERROR(cudaFree(output_horizontal));
-    CHECK_CUDART_ERROR(cudaFree(output_vertical));
     CHECK_CUDART_ERROR(cudaFree(gpu_data));
+    CHECK_CUDART_ERROR(cudaFree(output_monochrome));
+    CHECK_CUDART_ERROR(cudaFree(output_vertical));
+    CHECK_CUDART_ERROR(cudaFree(output_horizontal));
+    CHECK_CUDART_ERROR(cudaFree(output));
 
     return 0;
 }
