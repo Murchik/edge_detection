@@ -24,8 +24,8 @@ int createTextureObject(cudaTextureObject_t& TexObj, const cudaArray_t& cuArray)
 
     struct cudaTextureDesc texDesc;
     memset(&texDesc, 0, sizeof(texDesc));
-    texDesc.addressMode[0]   = cudaAddressModeClamp;
-    texDesc.addressMode[1]   = cudaAddressModeClamp;
+    texDesc.addressMode[0]   = cudaAddressModeWrap;
+    texDesc.addressMode[1]   = cudaAddressModeWrap;
     texDesc.filterMode       = cudaFilterModeLinear;
     texDesc.readMode         = cudaReadModeElementType;
     texDesc.normalizedCoords = 1;
@@ -47,9 +47,14 @@ int createSurfaceObject(cudaSurfaceObject_t& SurfObj, cudaArray_t& cuArray) {
 }
 
 template <typename T>
-int createCudaArray(cudaArray_t& cuArray, int width, int height) {
+int createCudaArray(cudaArray_t& cuArray, const void* data, int width, int height) {
     cudaChannelFormatDesc channel_desc = cudaCreateChannelDesc<T>();
     CHECK_CUDART_ERROR(cudaMallocArray(&cuArray, &channel_desc, width, height));
+    if (data) {
+        const size_t spitch = width * sizeof(T);
+        CHECK_CUDART_ERROR(cudaMemcpy2DToArray(cuArray, 0, 0, data, spitch, width * sizeof(T), height, cudaMemcpyHostToDevice));
+    }
+
     return 0;
 }
 
@@ -126,64 +131,59 @@ int applyGaussian(const cudaArray_t& inCuArray, cudaArray_t& outCuArray, int wid
     return 0;
 }
 
-// int applySobel(const cudaArray_t& inCuArray, cudaArray_t& outCuArray, int width, int height) {
-//     dim3 threadsperBlock(16, 16);
-//     dim3 numBlocks((width + threadsperBlock.x - 1) / threadsperBlock.x,
-//                    (height + threadsperBlock.y - 1) / threadsperBlock.y);
+int applySobelFilter(const cudaArray_t& inCuArray, cudaArray_t& outCuArray, int width, int height) {
+    dim3 threadsperBlock(16, 16);
+    dim3 numBlocks((width + threadsperBlock.x - 1) / threadsperBlock.x,
+                   (height + threadsperBlock.y - 1) / threadsperBlock.y);
 
-//     // Applying vertical kernel of the Sobel filter
-//     cudaTextureObject_t inTexObj = 0;
-//     createTextureObject(inTexObj, inCuArray);    
+    // Applying vertical kernel of the Sobel filter
+    cudaTextureObject_t inTexObj = 0;
+    createTextureObject(inTexObj, inCuArray);    
 
-//     cudaArray_t outSobelHorizontal;
-//     createCudaArray<float>(outSobelHorizontal, nullptr, width, height);
-//     cudaSurfaceObject_t outSobelHorizontalSurfObj;
-//     createSurfaceObject(outSobelHorizontalSurfObj, outSobelHorizontal);
+    cudaArray_t outSobelHorizontal;
+    createCudaArray<float>(outSobelHorizontal, nullptr, width, height);
+    cudaSurfaceObject_t outSobelHorizontalSurfObj;
+    createSurfaceObject(outSobelHorizontalSurfObj, outSobelHorizontal);
 
-//     sobelHorizontalKernel<<<numBlocks, threadsperBlock>>>(inTexObj, outSobelHorizontalSurfObj, width, height);
-//     CHECK_CUDART_ERROR(cudaDeviceSynchronize());
+    sobelHorizontalKernel<<<numBlocks, threadsperBlock>>>(inTexObj, outSobelHorizontalSurfObj, width, height);
+    CHECK_CUDART_ERROR(cudaDeviceSynchronize());
 
-//     CHECK_CUDART_ERROR(cudaDestroySurfaceObject(outSobelHorizontalSurfObj));
-//     CHECK_CUDART_ERROR(cudaDestroyTextureObject(inTexObj));
+    CHECK_CUDART_ERROR(cudaDestroySurfaceObject(outSobelHorizontalSurfObj));
 
-//     // Applying horizontal kernel of the Sobel filter
-//     cudaArray_t inCuArrayCopy;
-//     createCudaArray<float>(inCuArrayCopy, inCuArray, width, height);
-//     cudaTextureObject_t inTexObjCopy = 0;
-//     createTextureObject(inTexObjCopy, inCuArrayCopy);
+    // Applying horizontal kernel of the Sobel filter
+    cudaArray_t outSobelVertical;
+    createCudaArray<float>(outSobelVertical, nullptr, width, height);
+    cudaSurfaceObject_t outSobelVerticalSurfObj;
+    createSurfaceObject(outSobelVerticalSurfObj, outSobelVertical);
 
-//     cudaArray_t outSobelVertical;
-//     createCudaArray<float>(outSobelVertical, nullptr, width, height);
-//     cudaSurfaceObject_t outSobelVerticalSurfObj;
-//     createSurfaceObject(outSobelVerticalSurfObj, outSobelVertical);
+    sobelVerticalKernel<<<numBlocks, threadsperBlock>>>(inTexObj, outSobelVerticalSurfObj, width, height);
+    CHECK_CUDART_ERROR(cudaDeviceSynchronize());
 
-//     sobelVerticalKernel<<<numBlocks, threadsperBlock>>>(inTexObjCopy, outSobelVerticalSurfObj, width, height);
-//     CHECK_CUDART_ERROR(cudaDeviceSynchronize());
+    CHECK_CUDART_ERROR(cudaDestroySurfaceObject(outSobelVerticalSurfObj));
+    CHECK_CUDART_ERROR(cudaDestroyTextureObject(inTexObj));
 
-//     CHECK_CUDART_ERROR(cudaDestroySurfaceObject(outSobelVerticalSurfObj));
-//     CHECK_CUDART_ERROR(cudaDestroyTextureObject(inTexObjCopy));
+    // // Getting result of the Sobel filter
+    cudaTextureObject_t inHorizontalTexObj = 0;
+    createTextureObject(inHorizontalTexObj, outSobelHorizontal);
 
-//     // Getting result of the Sobel filter
-//     cudaSurfaceObject_t outSurfObj;
-//     createSurfaceObject(outSurfObj, outCuArray);
+    cudaTextureObject_t inVerticalTexObj = 0;
+    createTextureObject(inVerticalTexObj, outSobelVertical);
 
-//     cudaTextureObject_t inHorizontalTexObj = 0;
-//     createTextureObject(inHorizontalTexObj, outSobelHorizontal);
+    cudaSurfaceObject_t outSurfObj;
+    createSurfaceObject(outSurfObj, outCuArray);
 
-//     cudaTextureObject_t inVerticalTexObj = 0;
-//     createTextureObject(inVerticalTexObj, outSobelVertical);
+    rootKernel<<<numBlocks, threadsperBlock>>>(inHorizontalTexObj, inVerticalTexObj, outSurfObj, width, height);
+    CHECK_CUDART_ERROR(cudaDeviceSynchronize());
 
-//     rootKernel<<<numBlocks, threadsperBlock>>>(inHorizontalTexObj, inVerticalTexObj, outSurfObj, width, height);
-//     CHECK_CUDART_ERROR(cudaDeviceSynchronize());
+    CHECK_CUDART_ERROR(cudaDestroySurfaceObject(outSurfObj));
+    CHECK_CUDART_ERROR(cudaDestroyTextureObject(inVerticalTexObj));
+    CHECK_CUDART_ERROR(cudaDestroyTextureObject(inHorizontalTexObj));
 
-//     CHECK_CUDART_ERROR(cudaDestroyTextureObject(inVerticalTexObj));
-//     CHECK_CUDART_ERROR(cudaDestroyTextureObject(inHorizontalTexObj));
-//     CHECK_CUDART_ERROR(cudaDestroySurfaceObject(outSurfObj));
+    CHECK_CUDART_ERROR(cudaFreeArray(outSobelVertical));
+    CHECK_CUDART_ERROR(cudaFreeArray(outSobelHorizontal));
 
-//     CHECK_CUDART_ERROR(cudaFreeArray(outSobelVertical));
-//     CHECK_CUDART_ERROR(cudaFreeArray(inCuArrayCopy));
-//     CHECK_CUDART_ERROR(cudaFreeArray(outSobelHorizontal));
-// }
+    return 0;
+}
 
 int convertToRGBA(const cudaArray_t& inCuArray, cudaArray_t& outCuArray, int width, int height) {
     dim3 threadsperBlock(16, 16);
@@ -213,35 +213,36 @@ int ApplySobel(uint32_t* data, int w, int h) {
 
     const size_t spitch = w * sizeof(uint32_t);
     CHECK_CUDART_ERROR(cudaMemcpy2DToArray(gpuData, 0, 0, data, spitch, w * sizeof(uchar4), h, cudaMemcpyHostToDevice));
-        
+    
+    // Convert data to float values
     cudaArray_t gpuDataFloat4;
-    createCudaArray<float4>(gpuDataFloat4, w, h);
+    createCudaArray<float4>(gpuDataFloat4, nullptr, w, h);
     applyToFloat(gpuData, gpuDataFloat4, w, h);
     CHECK_CUDART_ERROR(cudaFreeArray(gpuData));
 
     // Applying greyscale filter
     cudaArray_t greyscaleOut;
-    createCudaArray<float>(greyscaleOut, w, h);
+    createCudaArray<float>(greyscaleOut, nullptr, w, h);
     applyGreyscale(gpuDataFloat4, greyscaleOut, w, h);
     CHECK_CUDART_ERROR(cudaFreeArray(gpuDataFloat4));
 
     // Applying gaussian blur filter
     cudaArray_t gaussianOut;
-    createCudaArray<float>(gaussianOut, w, h);
+    createCudaArray<float>(gaussianOut, nullptr, w, h);
     applyGaussian(greyscaleOut, gaussianOut, w, h);
     CHECK_CUDART_ERROR(cudaFreeArray(greyscaleOut));
 
-    // // Applying sobel filter
-    // cudaArray_t sobelOut;
-    // createCudaArray<float>(sobelOut, w, h);
-    // applySobel(gaussianOut, sobelOut, w, h);
-    // CHECK_CUDART_ERROR(cudaFreeArray(gaussianOut));
+    // Applying sobel filter
+    cudaArray_t sobelOut;
+    createCudaArray<float>(sobelOut, nullptr, w, h);
+    applySobelFilter(gaussianOut, sobelOut, w, h);
+    CHECK_CUDART_ERROR(cudaFreeArray(gaussianOut));
 
     // Convert back to RGBA
     cudaArray_t output;
-    createCudaArray<uchar4>(output, w, h);
-    convertToRGBA(gaussianOut, output, w, h);
-    CHECK_CUDART_ERROR(cudaFreeArray(gaussianOut));
+    createCudaArray<uchar4>(output, nullptr, w, h);
+    convertToRGBA(sobelOut, output, w, h);
+    CHECK_CUDART_ERROR(cudaFreeArray(sobelOut));
 
     // Copy data back to host
     CHECK_CUDART_ERROR(cudaMemcpy2DFromArray(data, w * sizeof(uint32_t), output, 0, 0, w * sizeof(uchar4), h, cudaMemcpyDeviceToHost));
