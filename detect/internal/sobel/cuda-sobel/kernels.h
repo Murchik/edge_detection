@@ -1,29 +1,37 @@
-#if !defined(CUDA_KERNELS)
-#define CUDA_KERNELS
+#ifndef KERNELS_H
+#define KERNELS_H
 
 #include <cmath>
 
 #include "cuda_runtime.h"
 
-__global__ void greyscaleKernel(uchar4 *output, cudaTextureObject_t texObj, int width, int height) {
+__global__ void greyscaleKernel(cudaTextureObject_t texObj, cudaSurfaceObject_t outputSurfObj, int width, int height) {
+    // Calculate surface coordinates
     unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    uchar4 pixel = tex2D<uchar4>(texObj, x / static_cast<float>(width),
-                                         y / static_cast<float>(height));
+    float u = x / static_cast<float>(width);
+    float v = y / static_cast<float>(height);
 
-    float Y = 0.2126f * (static_cast<float>(pixel.x) / 255.0f)
-            + 0.7152f * (static_cast<float>(pixel.y) / 255.0f)
-            + 0.0722f * (static_cast<float>(pixel.z) / 255.0f);
+    if (x < width && y < height) {
+        uchar4 pixel = tex2D<uchar4>(texObj, u, v);;
+        
+        float R = static_cast<float>(pixel.x) / 255.0f;
+        float G = static_cast<float>(pixel.y) / 255.0f;
+        float B = static_cast<float>(pixel.z) / 255.0f;
 
-    if (Y > 0.0031308f) {
-        Y = 1.055f * powf(Y, 1.0f / 2.4f) - 0.055f;
-    } else {
-        Y = 12.92f * Y;
+        float Y = 0.2126f * R + 0.7152f * G + 0.0722f * B;
+
+        if (Y > 0.0031308f) {
+            Y = 1.055f * powf(Y, 1.0f / 2.4f) - 0.055f;
+        } else {
+            Y = 12.92f * Y;
+        }
+        Y *= 255.0f;
+
+        pixel = make_uchar4(Y, Y, Y, 0);
+        surf2Dwrite(pixel, outputSurfObj, x * 4, y);
     }
-
-    unsigned char Y_out = static_cast<unsigned char>(Y * 255.0f);
-    output[y * width + x] = make_uchar4(Y_out, Y_out, Y_out, 0);
 }
 
 /*
@@ -123,4 +131,4 @@ __global__ void conv_float_uchar4(const float *input, uchar4 *output, int image_
 }
 */
 
-#endif // CUDA_KERNELS
+#endif // KERNELS_H
