@@ -5,6 +5,18 @@
 
 #include "cuda_runtime.h"
 
+__device__ float gaussianFilterKernel[3][3] = { 1.0f, 2.0f, 1.0f, 
+                                                2.0f, 4.0f, 2.0f, 
+                                                1.0f, 2.0f, 1.0f };
+                                                
+__device__ float sobelHorizontalFilterKernel[3][3] = { -1.0f, 0.0f, 1.0f, 
+                                                       -2.0f, 0.0f, 2.0f, 
+                                                       -1.0f, 0.0f, 1.0f };
+
+__device__ float sobelVerticalFilterKernel[3][3] = { -1.0f, -2.0f, -1.0f, 
+                                                      0.0f,  0.0f,  0.0f, 
+                                                      1.0f,  2.0f,  1.0f };
+
 __global__ void toFloatKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_t outSurfObj, int width, int height) {
     unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -24,11 +36,11 @@ __global__ void greyscaleKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_
     unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (x < width && y < height) {
-        float u = static_cast<float>(x) / static_cast<float>(width);
-        float v = static_cast<float>(y) / static_cast<float>(height);
+        float u = x / static_cast<float>(width);
+        float v = y / static_cast<float>(height);
 
         float4 pixel = tex2D<float4>(inTexObj, u, v);
-        
+
         float R =  pixel.x / 255.0f;
         float G =  pixel.y / 255.0f;
         float B =  pixel.z / 255.0f;
@@ -51,11 +63,9 @@ __global__ void gaussianKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_t
     unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (x < width && y < height) {
-        float gaussianFilterKernel[3][3] = { 1.0f, 2.0f, 1.0f, 
-                                             2.0f, 4.0f, 2.0f, 
-                                             1.0f, 2.0f, 1.0f };
         int i, j;
         float u, v;
+
         float result = 0.0f;
         for (i = 0; i < 3; i++) {
             for (j = 0; j < 3; j++) {
@@ -70,64 +80,26 @@ __global__ void gaussianKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_t
     }
 }
 
-__global__ void sobelHorizontalKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_t outSurfObj, int width, int height) {
+__global__ void sobelKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_t outSurfObj, int width, int height) {
     unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (x < width && y < height) {
-        float sobelHorizontalFilterKernel[3][3] = { -1.0f, -2.0f, -1.0f, 
-                                                     0.0f,  0.0f,  0.0f, 
-                                                     1.0f,  2.0f,  1.0f };
         int i, j;
         float u, v;
-        float result = 0.0f;
+
+        float resultHorizontal = 0.0f;
+        float resultVertical = 0.0f;
         for (i = 0; i < 3; i++) {
             for (j = 0; j < 3; j++) {
                 u = (x + j - 1) / static_cast<float>(width);
                 v = (y + i - 1) / static_cast<float>(height);
-                result += tex2D<float>(inTexObj, u, v) * sobelHorizontalFilterKernel[i][j];
+                resultHorizontal += tex2D<float>(inTexObj, u, v) * sobelHorizontalFilterKernel[i][j];
+                resultVertical += tex2D<float>(inTexObj, u, v) * sobelVerticalFilterKernel[i][j];
             }
         }
-
-        surf2Dwrite(result, outSurfObj, x * sizeof(float), y);
-    }
-}
-
-__global__ void sobelVerticalKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_t outSurfObj, int width, int height) {
-    unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
-
-    if (x < width && y < height) {
-        float sobelVerticalFilterKernel[3][3] = { 1.0f, 0.0f, -1.0f, 
-                                                  2.0f, 0.0f, -2.0f, 
-                                                  1.0f, 0.0f, -1.0f };
-        int i, j;
-        float u, v;
-        float result = 0.0f;
-        for (i = 0; i < 3; i++) {
-            for (j = 0; j < 3; j++) {
-                u = (x + j - 1) / static_cast<float>(width);
-                v = (y + i - 1) / static_cast<float>(height);
-                result += tex2D<float>(inTexObj, u, v) * sobelVerticalFilterKernel[i][j];
-            }
-        }
-
-        surf2Dwrite(result, outSurfObj, x * sizeof(float), y);
-    }
-}
-
-__global__ void rootKernel (cudaTextureObject_t inTexObjFirst, cudaTextureObject_t inTexObjSecond, cudaSurfaceObject_t outSurfObj, int width, int height) {
-    unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
-
-    if (x < width && y < height) {
-        float u = x / static_cast<float>(width);
-        float v = y / static_cast<float>(height);
-
-        float pixel_first  = tex2D<float>(inTexObjFirst, u, v);
-        float pixel_second = tex2D<float>(inTexObjSecond, u, v);
-
-        float result = sqrtf(powf(pixel_first, 2.0) + powf(pixel_second, 2.0));
+        float result = sqrtf(powf(resultHorizontal, 2.0) + powf(resultVertical, 2.0));
+        float resultDirection = atanf(resultVertical / resultHorizontal);
 
         surf2Dwrite(result, outSurfObj, x * sizeof(float), y);
     }

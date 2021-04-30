@@ -136,51 +136,17 @@ int applySobelFilter(const cudaArray_t& inCuArray, cudaArray_t& outCuArray, int 
     dim3 numBlocks((width + threadsperBlock.x - 1) / threadsperBlock.x,
                    (height + threadsperBlock.y - 1) / threadsperBlock.y);
 
-    // Applying vertical kernel of the Sobel filter
     cudaTextureObject_t inTexObj = 0;
-    createTextureObject(inTexObj, inCuArray);    
+    createTextureObject(inTexObj, inCuArray);
 
-    cudaArray_t outSobelHorizontal;
-    createCudaArray<float>(outSobelHorizontal, nullptr, width, height);
-    cudaSurfaceObject_t outSobelHorizontalSurfObj;
-    createSurfaceObject(outSobelHorizontalSurfObj, outSobelHorizontal);
-
-    sobelHorizontalKernel<<<numBlocks, threadsperBlock>>>(inTexObj, outSobelHorizontalSurfObj, width, height);
-    CHECK_CUDART_ERROR(cudaDeviceSynchronize());
-
-    CHECK_CUDART_ERROR(cudaDestroySurfaceObject(outSobelHorizontalSurfObj));
-
-    // Applying horizontal kernel of the Sobel filter
-    cudaArray_t outSobelVertical;
-    createCudaArray<float>(outSobelVertical, nullptr, width, height);
-    cudaSurfaceObject_t outSobelVerticalSurfObj;
-    createSurfaceObject(outSobelVerticalSurfObj, outSobelVertical);
-
-    sobelVerticalKernel<<<numBlocks, threadsperBlock>>>(inTexObj, outSobelVerticalSurfObj, width, height);
-    CHECK_CUDART_ERROR(cudaDeviceSynchronize());
-
-    CHECK_CUDART_ERROR(cudaDestroySurfaceObject(outSobelVerticalSurfObj));
-    CHECK_CUDART_ERROR(cudaDestroyTextureObject(inTexObj));
-
-    // // Getting result of the Sobel filter
-    cudaTextureObject_t inHorizontalTexObj = 0;
-    createTextureObject(inHorizontalTexObj, outSobelHorizontal);
-
-    cudaTextureObject_t inVerticalTexObj = 0;
-    createTextureObject(inVerticalTexObj, outSobelVertical);
-
-    cudaSurfaceObject_t outSurfObj;
+    cudaSurfaceObject_t outSurfObj = 0;
     createSurfaceObject(outSurfObj, outCuArray);
 
-    rootKernel<<<numBlocks, threadsperBlock>>>(inHorizontalTexObj, inVerticalTexObj, outSurfObj, width, height);
+    sobelKernel<<<numBlocks, threadsperBlock>>>(inTexObj, outSurfObj, width, height);
     CHECK_CUDART_ERROR(cudaDeviceSynchronize());
 
     CHECK_CUDART_ERROR(cudaDestroySurfaceObject(outSurfObj));
-    CHECK_CUDART_ERROR(cudaDestroyTextureObject(inVerticalTexObj));
-    CHECK_CUDART_ERROR(cudaDestroyTextureObject(inHorizontalTexObj));
-
-    CHECK_CUDART_ERROR(cudaFreeArray(outSobelVertical));
-    CHECK_CUDART_ERROR(cudaFreeArray(outSobelHorizontal));
+    CHECK_CUDART_ERROR(cudaDestroyTextureObject(inTexObj));
 
     return 0;
 }
