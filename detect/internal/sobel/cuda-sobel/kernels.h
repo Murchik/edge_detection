@@ -3,6 +3,7 @@
 
 #include <cmath>
 
+#define __CUDACC__
 #include "cuda_runtime.h"
 
 __device__ float gaussianFilterKernel[3][3] = { 1.0f, 2.0f, 1.0f, 
@@ -101,7 +102,9 @@ __global__ void sobelKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_t ou
         float result = sqrtf(powf(resultHorizontal, 2.0) + powf(resultVertical, 2.0));
         float resultDirection = atanf(resultVertical / resultHorizontal);
 
-        surf2Dwrite(result, outSurfObj, x * sizeof(float), y);
+        float2 result_float2 = make_float2(result, resultDirection);
+
+        surf2Dwrite(result_float2, outSurfObj, x * sizeof(float2), y);
     }
 }
 
@@ -113,8 +116,31 @@ __global__ void toRGBaKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_t o
         float u = x / static_cast<float>(width);
         float v = y / static_cast<float>(height);
 
-        float pixel = tex2D<float>(inTexObj, u, v);
-        uchar4 pixel_uchar4 = make_uchar4(pixel, pixel, pixel, 0);
+        float2 pixel_float2 = tex2D<float2>(inTexObj, u, v);
+
+        float pixel = pixel_float2.x;
+        float pixel_atan = pixel_float2.y;
+
+        float R, G, B;
+        if (pixel_atan > (M_PI / 6.0f)) {
+            R = (pixel_atan - M_PI / 6.0f) / (M_PI / 3.0f);
+            G = 0.0f;
+            B = 1.0f - (pixel_atan - M_PI / 6.0f) / (M_PI / 3.0f);
+        } else if (pixel_atan < (M_PI / 6.0f) && pixel_atan > -(M_PI / 6.0f)) {
+            R = 0.0f;
+            G = 1.0f - (pixel_atan + M_PI / 6.0f) / (M_PI / 3.0f);
+            B = (pixel_atan + M_PI / 6.0f) / (M_PI / 3.0f);
+        } else {
+            R = 1.0f - (pixel_atan + M_PI / 2.0f) / (M_PI / 3.0f);
+            G = (pixel_atan + M_PI / 2.0f) / (M_PI / 3.0f);
+            B = 0.0f;
+        }
+
+        R *= 255.0f * (pixel / 255.0f);
+        G *= 255.0f * (pixel / 255.0f);
+        B *= 255.0f * (pixel / 255.0f);
+
+        uchar4 pixel_uchar4 = make_uchar4(R, G, B, 0);
         surf2Dwrite(pixel_uchar4, outSurfObj, x * sizeof(uchar4), y);
     }
 }

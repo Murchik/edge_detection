@@ -200,7 +200,7 @@ int ApplySobel(uint32_t* data, int w, int h) {
 
     // Applying sobel filter
     cudaArray_t sobelOut;
-    createCudaArray<float>(sobelOut, nullptr, w, h);
+    createCudaArray<float2>(sobelOut, nullptr, w, h);
     applySobelFilter(gaussianOut, sobelOut, w, h);
     CHECK_CUDART_ERROR(cudaFreeArray(gaussianOut));
 
