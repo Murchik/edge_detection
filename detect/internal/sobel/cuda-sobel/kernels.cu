@@ -6,19 +6,12 @@
 #define __CUDACC__
 #include "cuda_runtime.h"
 
-__device__ float gaussianFilterKernel[3][3] = { 1.0f, 2.0f, 1.0f, 
-                                                2.0f, 4.0f, 2.0f, 
-                                                1.0f, 2.0f, 1.0f };
-                                                
-__device__ float sobelHorizontalFilterKernel[3][3] = { -1.0f, 0.0f, 1.0f, 
-                                                       -2.0f, 0.0f, 2.0f, 
-                                                       -1.0f, 0.0f, 1.0f };
-
-__device__ float sobelVerticalFilterKernel[3][3] = { -1.0f, -2.0f, -1.0f, 
-                                                      0.0f,  0.0f,  0.0f, 
-                                                      1.0f,  2.0f,  1.0f };
-
-__global__ void toFloatKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_t outSurfObj, int width, int height) {
+/*  
+    Conversion from uint32_t RGBA format (8bit, 8bit, 8bit, 8bit) to float4 format (float, float, float, float)
+        @param inTexObj texture object of cudaArray_t of uchar4.
+        @param outSurfObj surface object of cudaArray_t of float4.
+*/
+__global__ void convertToFloatKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_t outSurfObj, int width, int height) {
     unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -32,6 +25,11 @@ __global__ void toFloatKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_t 
     }
 }
 
+/*  
+    Conversion from float4 format (float, float, float, float) to single float value of pixel brightness
+        @param inTexObj texture object of cudaArray_t of float4.
+        @param outSurfObj surface object of cudaArray_t of float.
+*/
 __global__ void greyscaleKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_t outSurfObj, int width, int height) {
     unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -59,6 +57,15 @@ __global__ void greyscaleKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_
     }
 }
 
+__device__ float gaussianFilterKernel[3][3] = { 1.0f, 2.0f, 1.0f, 
+                                                2.0f, 4.0f, 2.0f, 
+                                                1.0f, 2.0f, 1.0f };
+
+/*  
+    Applying Gaussian blur to an array of floats representing the brightness of pixels
+        @param inTexObj texture object of cudaArray_t of float.
+        @param outSurfObj surface object of cudaArray_t of float.
+*/
 __global__ void gaussianKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_t outSurfObj, int width, int height) {
     unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -81,6 +88,19 @@ __global__ void gaussianKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_t
     }
 }
 
+__device__ float sobelHorizontalKernel[3][3] = { -1.0f, 0.0f, 1.0f, 
+                                                 -2.0f, 0.0f, 2.0f, 
+                                                 -1.0f, 0.0f, 1.0f };
+
+__device__ float sobelVerticalKernel[3][3] = { -1.0f, -2.0f, -1.0f, 
+                                                0.0f,  0.0f,  0.0f, 
+                                                1.0f,  2.0f,  1.0f };
+
+/*  
+    Applying sobel filter to an array of floats representing the brightness of pixels
+        @param inTexObj texture object of cudaArray_t of float.
+        @param outSurfObj surface object of cudaArray_t of float2. The first float is the gradient's magnitude, and the second is the gradient's direction.
+*/
 __global__ void sobelKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_t outSurfObj, int width, int height) {
     unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -95,8 +115,8 @@ __global__ void sobelKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_t ou
             for (j = 0; j < 3; j++) {
                 u = (x + j - 1) / static_cast<float>(width);
                 v = (y + i - 1) / static_cast<float>(height);
-                resultHorizontal += tex2D<float>(inTexObj, u, v) * sobelHorizontalFilterKernel[i][j];
-                resultVertical += tex2D<float>(inTexObj, u, v) * sobelVerticalFilterKernel[i][j];
+                resultHorizontal += tex2D<float>(inTexObj, u, v) * sobelHorizontalKernel[i][j];
+                resultVertical += tex2D<float>(inTexObj, u, v) * sobelVerticalKernel[i][j];
             }
         }
         float result = sqrtf(powf(resultHorizontal, 2.0) + powf(resultVertical, 2.0));
@@ -108,7 +128,12 @@ __global__ void sobelKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_t ou
     }
 }
 
-__global__ void toRGBaKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_t outSurfObj, int width, int height) {
+/*  
+    Converting float data to RGBA format where color of the pixel based on a direction of the gradient
+        @param inTexObj texture object of cudaArray_t of float2. The first float is the gradient's magnitude, and the second is the gradient's direction.
+        @param outSurfObj surface object of cudaArray_t of uchar4.
+*/
+__global__ void convertToRGBaKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_t outSurfObj, int width, int height) {
     unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -135,7 +160,6 @@ __global__ void toRGBaKernel(cudaTextureObject_t inTexObj, cudaSurfaceObject_t o
             G = (pixel_atan + M_PI / 2.0f) / (M_PI / 3.0f);
             B = 0.0f;
         }
-
         R *= 255.0f * (pixel / 255.0f);
         G *= 255.0f * (pixel / 255.0f);
         B *= 255.0f * (pixel / 255.0f);
