@@ -33,17 +33,17 @@ int ApplySobel(uint32_t* data, int w, int h) {
     applyKernel(gaussianKernel, greyscaleOut, gaussianOut, w, h);
     CHECK_CUDART_ERROR(cudaFreeArray(greyscaleOut));
 
-    // Applying sobel filter
-    cudaArray_t sobelOut;
-    createCudaArray<float2>(sobelOut, nullptr, w, h);
-    applyKernel(sobelKernel, gaussianOut, sobelOut, w, h);
+    // Applying edge detecting filter
+    cudaArray_t edgeOut;
+    createCudaArray<float2>(edgeOut, nullptr, w, h);
+    applyKernel(sobelKernel, gaussianOut, edgeOut, w, h);
     CHECK_CUDART_ERROR(cudaFreeArray(gaussianOut));
 
     // Convert back to RGBA
     cudaArray_t output;
     createCudaArray<uchar4>(output, nullptr, w, h);
-    applyKernel(convertToRGBaKernel, sobelOut, output, w, h);
-    CHECK_CUDART_ERROR(cudaFreeArray(sobelOut));
+    applyKernel(convertToRGBaKernel, edgeOut, output, w, h);
+    CHECK_CUDART_ERROR(cudaFreeArray(edgeOut));
 
     // Copy data back to host
     CHECK_CUDART_ERROR(cudaMemcpy2DFromArray(data, w * sizeof(uint32_t), output, 0, 0, w * sizeof(uchar4), h, cudaMemcpyDeviceToHost));
